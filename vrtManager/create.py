@@ -143,9 +143,9 @@ class wvmCreate(wvmConnect):
 
         disk_letters = list(string.lowercase)
         for image, type in images.items():
-            xml += """  <disk type='file' device='disk'>
+            xml += """  <disk type='block' device='disk'>
                           <driver name='qemu' type='%s'/>
-                          <source file='%s'/>""" % (type, image)
+                          <source dev='%s'/>""" % (type, image)
             if virtio:
                 xml += """<target dev='vd%s' bus='virtio'/>""" % (disk_letters.pop(0),)
             else:
