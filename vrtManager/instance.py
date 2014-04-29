@@ -67,7 +67,7 @@ class wvmInstances(wvmConnect):
 
     def moveto(self, conn, name):
         dom = conn.get_instance(name)
-        self.wvm.migrate(dom, 0, name, None, 0)
+        dom.migrate(self.wvm, 0, name, None, 0)
 
     def define_move(self, name):
         dom = self.get_instance(name)
@@ -162,6 +162,7 @@ class wvmInstance(wvmConnect):
                         return host
                 return None
             return util.get_xml_path(net.XMLDesc(0), func=fixed)
+
         def networks(ctx):
             result = []
             for net in ctx.xpathEval('/domain/devices/interface'):
@@ -290,20 +291,29 @@ class wvmInstance(wvmConnect):
         return cpu_usage
 
     def disk_usage(self):
-        devices=[]
+        devices = []
         dev_usage = []
         tree = ElementTree.fromstring(self._XMLDesc(0))
         for disk in tree.findall('devices/disk'):
             if disk.get('device') == 'disk':
+                dev_file = None
+                dev_bus = None
+                network_disk = True
                 for elm in disk:
                     if elm.tag == 'source':
+                        if elm.get('protocol'):
+                            dev_file = elm.get('protocol')
+                            network_disk = True
                         if elm.get('file'):
                             dev_file = elm.get('file')
                         if elm.get('dev'):
                             dev_file = elm.get('dev')
                     if elm.tag == 'target':
                             dev_bus = elm.get('dev')
-                devices.append([dev_file, dev_bus])
+                if (dev_file and dev_bus) is not None:
+                    if network_disk:
+                        dev_file = dev_bus
+                    devices.append([dev_file, dev_bus])
         for dev in devices:
             rd_use_ago = self.instance.blockStats(dev[0])[1]
             wr_use_ago = self.instance.blockStats(dev[0])[3]
@@ -316,7 +326,7 @@ class wvmInstance(wvmConnect):
         return dev_usage
 
     def net_usage(self):
-        devices=[]
+        devices = []
         dev_usage = []
         tree = ElementTree.fromstring(self._XMLDesc(0))
         for target in tree.findall("devices/interface/target"):
@@ -338,14 +348,35 @@ class wvmInstance(wvmConnect):
 
     def set_vnc_passwd(self, passwd):
         xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
-        find_tag = re.findall('<graphics.*/>', xml)
-        if find_tag:
-            close_tag = '/'
+        root = ElementTree.fromstring(xml)
+        graphics_vnc = root.find("devices/graphics[@type='vnc']")
+        if passwd:
+            graphics_vnc.set('passwd', passwd)
         else:
-            close_tag = ''
-        newxml = "<graphics type='vnc' passwd='%s'%s>" % (passwd, close_tag)
-        xmldom = re.sub('<graphics.*>', newxml, xml)
-        self._defineXML(xmldom)
+            try:
+                graphics_vnc.attrib.pop('passwd')
+            except:
+                pass
+        newxml = ElementTree.tostring(root, encoding='utf-8', method='xml')
+        self._defineXML(newxml)
+
+    def set_vnc_keymap(self, keymap):
+        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
+        root = ElementTree.fromstring(xml)
+        graphics_vnc = root.find("devices/graphics[@type='vnc']")
+        if keymap:
+            graphics_vnc.set('keymap', keymap)
+        else:
+            try:
+                graphics_vnc.attrib.pop('keymap')
+            except:
+                pass
+        newxml = ElementTree.tostring(root, encoding='utf-8', method='xml')
+        self._defineXML(newxml)
+
+    def get_vnc_keymap(self):
+        return util.get_xml_path(self._XMLDesc(VIR_DOMAIN_XML_SECURE),
+                                 "/domain/devices/graphics/@keymap") or ''
 
     def change_settings(self, description, cur_memory, memory, cur_vcpu, vcpu):
         """
@@ -422,3 +453,53 @@ class wvmInstance(wvmConnect):
 
     def get_managed_save_image(self):
         return self.instance.hasManagedSaveImage(0)
+
+    def clone_instance(self, clone_name):
+        clone_dev_path = []
+
+        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
+        tree = ElementTree.fromstring(xml)
+        name = tree.find('name')
+        name.text = clone_name
+        uuid = tree.find('uuid')
+        tree.remove(uuid)
+
+        for disk in tree.findall('devices/disk'):
+            if disk.get('device') == 'disk':
+                for elm in disk:
+                    if elm.tag == 'source':
+                        if elm.get('file'):
+                            clone_dev_path.append(elm.get('file'))
+                            if elm.get('file').count(".") and len(elm.get('file').rsplit(".", 1)[1]) <= 7:
+                                path, suffix = elm.get('file').rsplit(".", 1)
+                                clone_path = path + "-clone" + "." + suffix
+                            else:
+                                clone_path = elm.get('file') + "-clone"
+                            elm.set('file', clone_path)
+
+        for clone_dev in clone_dev_path:
+            vol = self.get_volume_by_path(clone_dev)
+            vol_name = vol.name()
+            vol_format = util.get_xml_path(vol.XMLDesc(0), "/volume/target/format/@type")
+
+            if vol_name.count(".") and len(vol_name.rsplit(".", 1)[1]) <= 7:
+                name, suffix = vol_name.rsplit(".", 1)
+                clone_name = name + "-clone" + "." + suffix
+            else:
+                name, suffix = vol_name.rsplit(".", 1)
+                clone_name = vol_name + "-clone"
+
+            vol_clone_xml = """
+                            <volume>
+                                <name>%s</name>
+                                <capacity>0</capacity>
+                                <allocation>0</allocation>
+                                <target>
+                                    <format type='%s'/>
+                                </target>
+                            </volume>""" % (clone_name, vol_format)
+            stg = vol.storagePoolLookupByVolume()
+            stg.createXMLFrom(vol_clone_xml, vol, 0)
+
+        clone_xml = ElementTree.tostring(tree)
+        self._defineXML(clone_xml)

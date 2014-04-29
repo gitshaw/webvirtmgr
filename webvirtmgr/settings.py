@@ -1,7 +1,6 @@
 # Django settings for webvirtmgr project.
 import os
-# Uncomment the relevant entries for ldap authentication
-# from django_auth_ldap.config import LDAPSearch,GroupOfUniqueNamesType
+import logging
 
 
 DEBUG = True
@@ -9,40 +8,11 @@ TEMPLATE_DEBUG = DEBUG
 SESSION_COOKIE_SECURE = True
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTOCOL', 'https')
 
-AUTHENTICATION_BACKENDS = (
-#    'django_auth_ldap.backend.LDAPBackend',
-    'django.contrib.auth.backends.ModelBackend',
-)
-
 ADMINS = (
     # ('Your Name', 'your_email@example.com'),
 )
 
 MANAGERS = ADMINS
-
-# If the system is unable to verify the directory cert then change these settings
-#AUTH_LDAP_GLOBAL_OPTIONS = {
-#  ldap.OPT_X_TLS_REQUIRE_CERT: True,
-#  ldap.OPT_X_TLS_DEMAND: True,
-#  ldap.OPT_REFERRALS: False,
-#  ldap.OPT_X_TLS_CACERTDIR: "/etc/pki/tls/certs/",
-#}
-
-#AUTH_LDAP_SERVER_URI = "ldaps://ldapserverhostname.example.com"
-#AUTH_LDAP_BIND_DN = "uid=binduser,ou=systemusers,dc=example,dc=com"
-#AUTH_LDAP_BIND_PASSWORD = "<ldapbindpassword>"
-#AUTH_LDAP_USER_SEARCH = LDAPSearch("ou=users,dc=example,dc=com",
-#    ldap.SCOPE_SUBTREE, "(uid=%(user)s)")
-#AUTH_LDAP_GROUP_SEARCH = LDAPSearch("ou=groups,dc=example,dc=com",
-#    ldap.SCOPE_SUBTREE, "(objectClass=groupOfUniqueNames)"
-#)
-#AUTH_LDAP_GROUP_TYPE = GroupOfUniqueNamesType()
-#
-#AUTH_LDAP_USER_FLAGS_BY_GROUP = {
-#    "is_active": ["cn=grouptopermit1,ou=groups,dc=example,dc=com", "cn=grouptopermit2,ou=groups,dc=example,dc=com"],
-#    "is_staff": "cn=grouptopermit2,ou=groups,dc=example,dc=com",
-#    "is_superuser": "cn=grouptopermit2,ou=groups,dc=example,dc=com"
-#}
 
 DATABASES = {
     'default': {
@@ -87,12 +57,12 @@ USE_TZ = True
 
 # Absolute filesystem path to the directory that will hold user-uploaded files.
 # Example: "/var/www/example.com/media/"
-MEDIA_ROOT = ''
+MEDIA_ROOT = os.path.join(os.path.dirname(__file__), '..', 'media')
 
 # URL that handles the media served from MEDIA_ROOT. Make sure to use a
 # trailing slash.
 # Examples: "http://example.com/media/", "http://media.example.com/"
-MEDIA_URL = ''
+MEDIA_URL = '/media/'
 
 # Absolute path to the directory static files should be collected to.
 # Don't put anything in this directory yourself; store your static files
@@ -118,9 +88,6 @@ STATICFILES_FINDERS = (
     'django.contrib.staticfiles.finders.AppDirectoriesFinder',
     # 'django.contrib.staticfiles.finders.DefaultStorageFinder',
 )
-
-# Make this unique, and don't share it with anybody.
-SECRET_KEY = '#^)!5i$=r!h#v9z9j1j5^=+l0xb&1n*5s(e+93r$%zrzr3zgc1'
 
 # List of callables that know how to import templates from various sources.
 TEMPLATE_LOADERS = (
@@ -151,20 +118,6 @@ WSGI_APPLICATION = 'webvirtmgr.wsgi.application'
 
 TEMPLATE_DIRS = (os.path.join(os.path.dirname(__file__), '..', 'templates'),)
 
-INSTALLED_APPS = (
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.sites',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    # 'django.contrib.admin',
-    'servers',
-    'instance',
-    'create',
-    'gunicorn',
-)
-
 # A sample logging configuration. The only tangible logging
 # performed by this configuration is to send an email to
 # the site admins on every HTTP 500 error when DEBUG=False.
@@ -193,3 +146,45 @@ LOGGING = {
         },
     }
 }
+
+SECRET_KEY = None
+LOCAL_PATH = None
+
+try:
+    from local.local_settings import *  # noqa
+except ImportError:
+    logging.warning("No local_settings file found.")
+
+# Ensure that we always have a SECRET_KEY set, even when no local_settings.py
+# file is present.
+# THIS IS A BACKPORT FROM HORIZON https://github.com/openstack/horizon
+if not SECRET_KEY:
+    if not LOCAL_PATH:
+        LOCAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  'local')
+
+    from webvirtmgr.utils import secret_key
+    SECRET_KEY = secret_key.generate_or_read_from_file(os.path.join(LOCAL_PATH,
+                                                       '.secret_key_store'))
+
+# list taken from http://qemu.weilnetz.de/qemu-doc.html#sec_005finvocation
+QEMU_KEYMAPS = ['ar', 'da', 'de', 'de-ch', 'en-gb', 'en-us', 'es', 'et', 'fi',
+                'fo', 'fr', 'fr-be', 'fr-ca', 'fr-ch', 'hr', 'hu', 'is', 'it',
+                'ja', 'lt', 'lv', 'mk', 'nl', 'nl-be', 'no', 'pl', 'pt',
+                'pt-br', 'ru', 'sl', 'sv', 'th', 'tr']
+
+# Installed Apps shouldn't be overridden
+INSTALLED_APPS = (
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.sites',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    # 'django.contrib.admin',
+    'webvirtmgr',
+    'servers',
+    'instance',
+    'create',
+    'gunicorn',
+)
