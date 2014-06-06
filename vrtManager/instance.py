@@ -2,7 +2,7 @@
 # Copyright (C) 2013 Webvirtmgr.
 #
 import time
-import re
+import os.path
 from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE
 from vrtManager import util
 from xml.etree import ElementTree
@@ -183,24 +183,24 @@ class wvmInstance(wvmConnect):
             dev = None
             volume = None
             storage = None
-            file = None
+            src_fl = None
             for disk in ctx.xpathEval('/domain/devices/disk'):
                 device = disk.xpathEval('@device')[0].content
                 if device == 'disk':
                     try:
                         dev = disk.xpathEval('target/@dev')[0].content
-                        file = disk.xpathEval('source/@file|source/@dev|source/@name')[0].content
+                        src_fl = disk.xpathEval('source/@file|source/@dev|source/@name')[0].content
                         try:
-                            vol = self.get_volume_by_path(file)
+                            vol = self.get_volume_by_path(src_fl)
                             volume = vol.name()
                             stg = vol.storagePoolLookupByVolume()
                             storage = stg.name()
                         except libvirtError:
-                            volume = file
+                            volume = src_fl
                     except:
                         pass
                     finally:
-                        result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': file})
+                        result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': src_fl})
             return result
         return util.get_xml_path(self._XMLDesc(0), func=disks)
 
@@ -210,72 +210,70 @@ class wvmInstance(wvmConnect):
             dev = None
             volume = None
             storage = None
-            file = None
+            src_fl = None
             for media in ctx.xpathEval('/domain/devices/disk'):
                 device = media.xpathEval('@device')[0].content
                 if device == 'cdrom':
                     try:
                         dev = media.xpathEval('target/@dev')[0].content
-                        file = media.xpathEval('source/@file')[0].content
                         try:
-                            vol = self.get_volume_by_path(file)
+                            src_fl = media.xpathEval('source/@file')[0].content
+                            vol = self.get_volume_by_path(src_fl)
                             volume = vol.name()
                             stg = vol.storagePoolLookupByVolume()
                             storage = stg.name()
-                        except libvirtError:
-                            volume = file
+                        except:
+                            src_fl = None
+                            volume = src_fl
                     except:
                         pass
                     finally:
-                        result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': file})
+                        result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': src_fl})
             return result
         return util.get_xml_path(self._XMLDesc(0), func=disks)
 
-    def get_vnc(self):
-        vnc = util.get_xml_path(self._XMLDesc(0),
-                                "/domain/devices/graphics[@type='vnc']/@port")
-        return vnc
-
-    def mount_iso(self, image):
+    def mount_iso(self, dev, image):
         storages = self.get_storages()
         for storage in storages:
             stg = self.get_storage(storage)
             for img in stg.listVolumes():
                 if image == img:
                     vol = stg.storageVolLookupByName(image)
-                    if self.get_status() == 1:
-                        xml = """<disk type='file' device='cdrom'>
-                                    <driver name='qemu' type='raw'/>
-                                    <target dev='hda' bus='ide'/>
-                                    <source file='%s'/>
-                                 </disk>""" % vol.path()
-                        self.instance.attachDevice(xml)
-                        xmldom = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
-                        self._defineXML(xmldom)
-                    if self.get_status() == 5:
-                        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
-                        newxml = """<disk type='file' device='cdrom'>
-                                      <driver name='qemu' type='raw'/>
-                                      <target dev='hda' bus='ide'/>
-                                      <source file='%s'/>""" % vol.path()
-                        xml_string = "<disk type='file' device='cdrom'>\n      <driver name='qemu' type='raw'/>"
-                        xmldom = xml.replace(xml_string, newxml)
-                        self._defineXML(xmldom)
-
-    def umount_iso(self, image):
+        tree = ElementTree.fromstring(self._XMLDesc(0))
+        for disk in tree.findall('devices/disk'):
+            if disk.get('device') == 'cdrom':
+                for elm in disk:
+                    if elm.tag == 'target':
+                        if elm.get('dev') == dev:
+                            src_media = ElementTree.Element('source')
+                            src_media.set('file', vol.path())
+                            disk.insert(2, src_media)
         if self.get_status() == 1:
-            xml = """<disk type='file' device='cdrom'>
-                         <driver name="qemu" type='raw'/>
-                         <target dev='hda' bus='ide'/>
-                         <readonly/>
-                      </disk>"""
+            xml = ElementTree.tostring(disk)
             self.instance.attachDevice(xml)
             xmldom = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
-            self._defineXML(xmldom)
         if self.get_status() == 5:
-            xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
-            xmldom = xml.replace("<source file='%s'/>\n" % image, '')
-            self._defineXML(xmldom)
+            xmldom = ElementTree.tostring(tree)
+        self._defineXML(xmldom)
+
+    def umount_iso(self, dev, image):
+        tree = ElementTree.fromstring(self._XMLDesc(0))
+        for disk in tree.findall('devices/disk'):
+            if disk.get('device') == 'cdrom':
+                for elm in disk:
+                    if elm.tag == 'source':
+                        if elm.get('file') == image:
+                            src_media = elm
+                    if elm.tag == 'target':
+                        if elm.get('dev') == dev:
+                            disk.remove(src_media)
+        if self.get_status() == 1:
+            xml_disk = ElementTree.tostring(disk)
+            self.instance.attachDevice(xml_disk)
+            xmldom = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
+        if self.get_status() == 5:
+            xmldom = ElementTree.tostring(tree)
+        self._defineXML(xmldom)
 
     def cpu_usage(self):
         cpu_usage = {}
@@ -342,6 +340,27 @@ class wvmInstance(wvmConnect):
             dev_usage.append({'dev': i, 'rx': rx_diff_usage, 'tx': tx_diff_usage})
         return dev_usage
 
+    def get_telnet_port(self):
+        telnet_port = None
+        service_port = None
+        tree = ElementTree.fromstring(self._XMLDesc(0))
+        for console in tree.findall('devices/console'):
+            if console.get('type') == 'tcp':
+                for elm in console:
+                    if elm.tag == 'source':
+                        if elm.get('service'):
+                            service_port = elm.get('service')
+                    if elm.tag == 'protocol':
+                        if elm.get('type') == 'telnet':
+                            if service_port is not None:
+                                telnet_port = service_port
+        return telnet_port
+
+    def get_vnc(self):
+        vnc = util.get_xml_path(self._XMLDesc(0),
+                                "/domain/devices/graphics[@type='vnc']/@port")
+        return vnc
+
     def get_vnc_passwd(self):
         return util.get_xml_path(self._XMLDesc(VIR_DOMAIN_XML_SECURE),
                                  "/domain/devices/graphics/@passwd")
@@ -382,23 +401,30 @@ class wvmInstance(wvmConnect):
         """
         Function change ram and cpu on vds.
         """
-        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
         memory = int(memory) * 1024
         cur_memory = int(cur_memory) * 1024
-        xml_memory = "<memory unit='KiB'>%s</memory>" % memory
-        xml_memory_change = re.sub('<memory.*memory>', xml_memory, xml)
-        xml_curmemory = "<currentMemory unit='KiB'>%s</currentMemory>" % cur_memory
-        xml_curmemory_change = re.sub('<currentMemory.*currentMemory>', xml_curmemory, xml_memory_change)
-        xml_vcpu = "<vcpu current='%s'>%s</vcpu>" % (cur_vcpu, vcpu)
-        xml_vcpu_change = re.sub('<vcpu.*vcpu>', xml_vcpu, xml_curmemory_change)
-        xml_description = "<description>%s</description>" % description
-        find_description = re.findall('description', xml_vcpu_change)
-        if not find_description:
-            xml_description = '</uuid>\n' + xml_description
-            xml_description_change = re.sub('</uuid>', xml_description, xml_vcpu_change)
+
+        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
+        tree = ElementTree.fromstring(xml)
+
+        set_mem = tree.find('memory')
+        set_mem.text = str(memory)
+        set_cur_mem = tree.find('currentMemory')
+        set_cur_mem.text = str(cur_memory)
+        set_desc = tree.find('description')
+        set_vcpu = tree.find('vcpu')
+        set_vcpu.text = vcpu
+        set_vcpu.set('current', cur_vcpu)
+
+        if not set_desc:
+            tree_desc = ElementTree.Element('description')
+            tree_desc.text = description
+            tree.insert(2, tree_desc)
         else:
-            xml_description_change = re.sub('<description.*description>', xml_description, xml_vcpu_change)
-        self._defineXML(xml_description_change)
+            set_desc.text = description
+
+        new_xml = ElementTree.tostring(tree)
+        self._defineXML(new_xml)
 
     def get_iso_media(self):
         iso = []
@@ -454,52 +480,46 @@ class wvmInstance(wvmConnect):
     def get_managed_save_image(self):
         return self.instance.hasManagedSaveImage(0)
 
-    def clone_instance(self, clone_name):
+    def clone_instance(self, clone_data):
         clone_dev_path = []
 
         xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
         tree = ElementTree.fromstring(xml)
         name = tree.find('name')
-        name.text = clone_name
+        name.text = clone_data['name']
         uuid = tree.find('uuid')
         tree.remove(uuid)
 
         for disk in tree.findall('devices/disk'):
             if disk.get('device') == 'disk':
-                for elm in disk:
-                    if elm.tag == 'source':
-                        if elm.get('file'):
-                            clone_dev_path.append(elm.get('file'))
-                            if elm.get('file').count(".") and len(elm.get('file').rsplit(".", 1)[1]) <= 7:
-                                path, suffix = elm.get('file').rsplit(".", 1)
-                                clone_path = path + "-clone" + "." + suffix
-                            else:
-                                clone_path = elm.get('file') + "-clone"
-                            elm.set('file', clone_path)
+                elm = disk.find('target')
+                device_name = elm.get('dev')
+                if device_name:
+                    target_file = clone_data['disk-' + device_name]
+                    elm.set('dev', device_name)
 
-        for clone_dev in clone_dev_path:
-            vol = self.get_volume_by_path(clone_dev)
-            vol_name = vol.name()
-            vol_format = util.get_xml_path(vol.XMLDesc(0), "/volume/target/format/@type")
+                elm = disk.find('source')
+                source_file = elm.get('file')
+                if source_file:
+                    clone_dev_path.append(source_file)
+                    clone_path = os.path.join(os.path.dirname(source_file),
+                                              target_file)
+                    elm.set('file', clone_path)
 
-            if vol_name.count(".") and len(vol_name.rsplit(".", 1)[1]) <= 7:
-                name, suffix = vol_name.rsplit(".", 1)
-                clone_name = name + "-clone" + "." + suffix
-            else:
-                name, suffix = vol_name.rsplit(".", 1)
-                clone_name = vol_name + "-clone"
+                    vol = self.get_volume_by_path(source_file)
+                    vol_format = util.get_xml_path(vol.XMLDesc(0),
+                                                   "/volume/target/format/@type")
 
-            vol_clone_xml = """
-                            <volume>
-                                <name>%s</name>
-                                <capacity>0</capacity>
-                                <allocation>0</allocation>
-                                <target>
-                                    <format type='%s'/>
-                                </target>
-                            </volume>""" % (clone_name, vol_format)
-            stg = vol.storagePoolLookupByVolume()
-            stg.createXMLFrom(vol_clone_xml, vol, 0)
+                    vol_clone_xml = """
+                                    <volume>
+                                        <name>%s</name>
+                                        <capacity>0</capacity>
+                                        <allocation>0</allocation>
+                                        <target>
+                                            <format type='%s'/>
+                                        </target>
+                                    </volume>""" % (target_file, vol_format)
+                    stg = vol.storagePoolLookupByVolume()
+                    stg.createXMLFrom(vol_clone_xml, vol, 0)
 
-        clone_xml = ElementTree.tostring(tree)
-        self._defineXML(clone_xml)
+        self._defineXML(ElementTree.tostring(tree))
