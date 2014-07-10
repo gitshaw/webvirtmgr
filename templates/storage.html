@@ -25,7 +25,8 @@
                 <p>{% trans "Pool name" %}</p>
                 <p>{% trans "Pool type" %}</p>
                 <p>{% trans "Pool path" %}</p>
-                <p>{% trans "Size" %} ({{ size|filesizeformat }} / {{ free|filesizeformat }})</p>
+                <p>{% trans "Pool status" %}</p>
+                <p>{% trans "Size" %} ({{ size|filesizeformat }} / {{ used|filesizeformat }})</p>
                 <p>{% trans "State" %}</p>
                 <p>{% trans "Autostart" %}</p>
             </div>
@@ -41,6 +42,7 @@
                 </p>
                 <p>{% if not type %}{% trans "None" %}{% else %}{{ type }}{% endif %}</p>
                 <p>{% if not path %}{% trans "None" %}{% else %}{{ path }}{% endif %}</p>
+                <p>{% if not status %}{% trans "None" %}{% else %}{{ status }}{% endif %}</p>
                 <p>{% trans "Usage" %}: {{ percent }}%</p>
                 <p>
                     <form action="" method="post">{% csrf_token %}
@@ -63,7 +65,7 @@
                 </p>
             </div>
         </div>
-        {% if path %}
+        {% if state %}
             {% ifequal pool "iso" %}
                 <h3>{% trans "Images" %}</h3>
                 <hr>
@@ -146,7 +148,7 @@
                                                         </div>
                                                         <label class="col-sm-1 control-label">.img</label>
                                                     </div>
-                                                    <div class="form-group">
+                                                    <div class="form-group" id="image_format">
                                                         <label class="col-sm-3 control-label">{% trans "Convert" %}</label>
                                                         <div class="col-sm-6">
                                                             <input class="volume-convert" type="checkbox" name="convert" value="true">
@@ -210,7 +212,7 @@
                             <input type="text" class="form-control" name="name" placeholder="{% trans "Name" %}" required pattern="[a-zA-Z0-9\.\-_]+">
                         </div>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" id="image_format">
                         <label class="col-sm-3 control-label">{% trans "Format" %}</label>
                         <div class="col-sm-6">
                             <select name="format" class="form-control">
@@ -269,5 +271,8 @@
                 $('.format-convert').hide();
             }
         });
+        {% ifnotequal type 'dir' %}
+            $('#image_format').hide();
+        {% endifnotequal %}
     </script>
 {% endblock %}

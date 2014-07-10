@@ -94,13 +94,6 @@ def instusage(request, host_id, vname):
             datasets['cpu'].append(int(cpu_usage['cpu']))
             del datasets['cpu'][0]
 
-        # Some fix division by 0 Chart.js
-        if len(datasets['cpu']) == 10:
-            if sum(datasets['cpu']) == 0:
-                datasets['cpu'][9] += 0.1
-            if sum(datasets['cpu']) / 10 == datasets['cpu'][0]:
-                datasets['cpu'][9] += 0.1
-
         cpu = {
             'labels': [""] * 10,
             'datasets': [
@@ -149,13 +142,6 @@ def instusage(request, host_id, vname):
                 if len(datasets_wr) == 10:
                     datasets_wr.append(int(blk['wr']) / 1048576)
                     del datasets_wr[0]
-
-                # Some fix division by 0 Chart.js
-                if len(datasets_rd) == 10:
-                    if sum(datasets_rd) == 0:
-                        datasets_rd[9] += 0.01
-                    if sum(datasets_rd) / 10 == datasets_rd[0]:
-                        datasets_rd[9] += 0.01
 
                 disk = {
                     'labels': [""] * 10,
@@ -215,13 +201,6 @@ def instusage(request, host_id, vname):
                 if len(datasets_tx) == 10:
                     datasets_tx.append(int(net['tx']) / 1048576)
                     del datasets_tx[0]
-
-                # Some fix division by 0 Chart.js
-                if len(datasets_rx) == 10:
-                    if sum(datasets_rx) == 0:
-                        datasets_rx[9] += 0.01
-                    if sum(datasets_rx) / 10 == datasets_rx[0]:
-                        datasets_rx[9] += 0.01
 
                 network = {
                     'labels': [""] * 10,
@@ -338,8 +317,8 @@ def insts_status(request, host_id):
                             compute.password,
                             compute.type)
         get_instances = conn.get_instances()
-    except libvirtError as msg_error:
-        errors.append(msg_error.message)
+    except libvirtError as err:
+        errors.append(err)
 
     for instance in get_instances:
         instances.append({'name': instance,
@@ -378,8 +357,8 @@ def instances(request, host_id):
                             compute.password,
                             compute.type)
         get_instances = conn.get_instances()
-    except libvirtError as msg_error:
-        errors.append(msg_error.message)
+    except libvirtError as err:
+        errors.append(err)
 
     for instance in get_instances:
         try:
@@ -423,8 +402,8 @@ def instances(request, host_id):
                     return HttpResponseRedirect(request.get_full_path())
 
             conn.close()
-        except libvirtError as msg_error:
-            errors.append(msg_error.message)
+        except libvirtError as err:
+            errors.append(err)
 
     return render_to_response('instances.html', locals(), context_instance=RequestContext(request))
 
@@ -485,8 +464,8 @@ def instance(request, host_id, vname):
         inst_xml = conn._XMLDesc(VIR_DOMAIN_XML_SECURE)
         has_managed_save_image = conn.get_managed_save_image()
         clone_disks = show_clone_disk(disks)
-    except libvirtError as msg_error:
-        errors.append(msg_error.message)
+    except libvirtError as err:
+        errors.append(err)
 
     try:
         instance = Instance.objects.get(compute_id=host_id, name=vname)
@@ -589,12 +568,14 @@ def instance(request, host_id, vname):
 
             if 'migrate' in request.POST:
                 compute_id = request.POST.get('compute_id', '')
+                live = request.POST.get('live_migrate', False)
+                xml_del = request.POST.get('xml_delete', False)
                 new_compute = Compute.objects.get(id=compute_id)
                 conn_migrate = wvmInstances(new_compute.hostname,
                                             new_compute.login,
                                             new_compute.password,
                                             new_compute.type)
-                conn_migrate.moveto(conn, vname)
+                conn_migrate.moveto(conn, vname, live, xml_del)
                 conn_migrate.define_move(vname)
                 conn_migrate.close()
                 return HttpResponseRedirect('/instance/%s/%s' % (compute_id, vname))
@@ -621,7 +602,7 @@ def instance(request, host_id, vname):
 
         conn.close()
 
-    except libvirtError as msg_error:
-        errors.append(msg_error.message)
+    except libvirtError as err:
+        errors.append(err)
 
     return render_to_response('instance.html', locals(), context_instance=RequestContext(request))

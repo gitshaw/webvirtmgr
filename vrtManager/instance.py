@@ -3,7 +3,7 @@
 #
 import time
 import os.path
-from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE
+from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE, VIR_MIGRATE_LIVE
 from vrtManager import util
 from xml.etree import ElementTree
 from datetime import datetime
@@ -65,9 +65,14 @@ class wvmInstances(wvmConnect):
         dom = self.get_instance(name)
         dom.resume()
 
-    def moveto(self, conn, name):
+    def moveto(self, conn, name, live, undefine):
+        flags = 0
+        if live and conn.get_status() == 1:
+            flags |= VIR_MIGRATE_LIVE
         dom = conn.get_instance(name)
-        dom.migrate(self.wvm, 0, name, None, 0)
+        dom.migrate(self.wvm, flags, name, None, 0)
+        if undefine:
+            dom.undefine()
 
     def define_move(self, name):
         dom = self.get_instance(name)
@@ -78,7 +83,7 @@ class wvmInstances(wvmConnect):
 class wvmInstance(wvmConnect):
     def __init__(self, host, login, passwd, conn, vname):
         wvmConnect.__init__(self, host, login, passwd, conn)
-        self.instance = self.wvm.lookupByName(vname)
+        self.instance = self.get_instance(vname)
 
     def start(self):
         self.instance.create()
@@ -236,9 +241,10 @@ class wvmInstance(wvmConnect):
         storages = self.get_storages()
         for storage in storages:
             stg = self.get_storage(storage)
-            for img in stg.listVolumes():
-                if image == img:
-                    vol = stg.storageVolLookupByName(image)
+            if stg.info()[0] != 0:
+                for img in stg.listVolumes():
+                    if image == img:
+                        vol = stg.storageVolLookupByName(image)
         tree = ElementTree.fromstring(self._XMLDesc(0))
         for disk in tree.findall('devices/disk'):
             if disk.get('device') == 'cdrom':

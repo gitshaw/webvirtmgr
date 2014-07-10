@@ -21,6 +21,9 @@ pre {
     margin-left: auto;
     margin-right: auto;
 }
+.page-header {
+    margin-top: 0;
+}
 .pagehead {
     position: relative;
     margin-bottom: 20px;
@@ -82,6 +85,20 @@ pre {
 .panel-success {
     margin-top: 20px;
 }
+.panel-danger {
+    margin-top: 20px;
+}
+.panel-data {
+    width: 30%;
+    float: left;
+    margin-right: 5%;
+}
+div.panel:nth-child(3n+4) {
+    margin-right: 0
+}
+.panel-body:after {
+    clear: none;
+}
 .well {
     margin-top: 20px;
     text-align: center;
@@ -141,6 +158,9 @@ p {
 }
 .nav-tabs {
     background-color: #eee;
+}
+.nav-btn-act {
+    height: 42px;
 }
 .tab-inst {
     padding: 15px;
