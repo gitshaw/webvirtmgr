@@ -5,7 +5,7 @@ import os
 #
 # Server socket
 #
-#   bind - The socket to bind.
+# bind - The socket to bind.
 #
 #       A string of the form: 'HOST', 'HOST:PORT', 'unix:PATH'.
 #       An IP is a valid HOST.
@@ -71,6 +71,7 @@ backlog = 2048
 #       A positive integer. Generally set in the 1-5 seconds range.
 #
 
+
 def get_workers():
     procs = os.sysconf('SC_NPROCESSORS_ONLN')
     if procs > 0:
@@ -78,8 +79,9 @@ def get_workers():
     else:
         return 3
 
+
 workers = get_workers()
-#worker_class = 'egg:gunicorn#eventlet'
+# worker_class = 'egg:gunicorn#eventlet'
 worker_connections = 1000
 timeout = 600
 keepalive = 2

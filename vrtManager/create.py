@@ -5,6 +5,8 @@ import string
 from vrtManager import util
 from vrtManager.connection import wvmConnect
 
+from webvirtmgr.settings import QEMU_CONSOLE_DEFAULT_TYPE
+
 
 def get_rbd_storage_data(stg):
     xml = stg.XMLDesc(0)
@@ -42,7 +44,7 @@ class wvmCreate(wvmConnect):
         """Get guest capabilities"""
         return util.get_xml_path(self.get_cap_xml(), "/capabilities/host/cpu/arch")
 
-    def create_volume(self, storage, name, size, format='qcow2'):
+    def create_volume(self, storage, name, size, format='qcow2', metadata=False):
         size = int(size) * 1073741824
         stg = self.get_storage(storage)
         storage_type = util.get_xml_path(stg.XMLDesc(0), "/pool/@type")
@@ -51,6 +53,7 @@ class wvmCreate(wvmConnect):
             alloc = 0
         else:
             alloc = size
+            metadata = False
         xml = """
             <volume>
                 <name>%s</name>
@@ -60,7 +63,7 @@ class wvmCreate(wvmConnect):
                     <format type='%s'/>
                 </target>
             </volume>""" % (name, size, alloc, format)
-        stg.createXML(xml, 0)
+        stg.createXML(xml, metadata)
         try:
             stg.refresh(0)
         except:
@@ -93,13 +96,15 @@ class wvmCreate(wvmConnect):
         vol = self.get_volume_by_path(vol_path)
         return vol.storagePoolLookupByVolume()
 
-    def clone_from_template(self, clone, template):
+    def clone_from_template(self, clone, template, metadata=False):
         vol = self.get_volume_by_path(template)
         stg = vol.storagePoolLookupByVolume()
         storage_type = util.get_xml_path(stg.XMLDesc(0), "/pool/@type")
         format = util.get_xml_path(vol.XMLDesc(0), "/volume/target/format/@type")
         if storage_type == 'dir':
             clone += '.img'
+        else:
+            metadata = False
         xml = """
             <volume>
                 <name>%s</name>
@@ -109,7 +114,7 @@ class wvmCreate(wvmConnect):
                     <format type='%s'/>
                 </target>
             </volume>""" % (clone, format)
-        stg.createXMLFrom(xml, vol, 0)
+        stg.createXMLFrom(xml, vol, metadata)
         clone_vol = stg.storageVolLookupByName(clone)
         return clone_vol.path()
 
@@ -200,7 +205,7 @@ class wvmCreate(wvmConnect):
 
         xml += """  <input type='mouse' bus='ps2'/>
                     <input type='tablet' bus='usb'/>
-                    <graphics type='vnc' port='-1' autoport='yes' listen='0.0.0.0'>
+                    <graphics type='%s' port='-1' autoport='yes' listen='0.0.0.0'>
                       <listen type='address' address='0.0.0.0'/>
                     </graphics>
                     <console type='pty'/>
@@ -209,5 +214,5 @@ class wvmCreate(wvmConnect):
                     </video>
                     <memballoon model='virtio'/>
                   </devices>
-                </domain>"""
+                </domain>""" % QEMU_CONSOLE_DEFAULT_TYPE
         self._defineXML(xml)

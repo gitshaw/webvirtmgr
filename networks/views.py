@@ -2,6 +2,7 @@ from django.shortcuts import render_to_response
 from django.http import HttpResponseRedirect
 from django.template import RequestContext
 from django.utils.translation import ugettext_lazy as _
+from django.core.urlresolvers import reverse
 
 from servers.models import Compute
 from networks.forms import AddNetPool
@@ -17,7 +18,7 @@ def networks(request, host_id):
     Networks block
     """
     if not request.user.is_authenticated():
-        return HttpResponseRedirect('/login')
+        return HttpResponseRedirect(reverse('login'))
 
     errors = []
     compute = Compute.objects.get(id=host_id)
@@ -47,7 +48,7 @@ def networks(request, host_id):
                     if not errors:
                         conn.create_network(data['name'], data['forward'], gateway, netmask,
                                             dhcp, data['bridge_name'], data['openvswitch'], data['fixed'])
-                        return HttpResponseRedirect('/network/%s/%s/' % (host_id, data['name']))
+                        return HttpResponseRedirect(reverse('network', args=[host_id, data['name']]))
         conn.close()
     except libvirtError as err:
         errors.append(err)
@@ -60,7 +61,7 @@ def network(request, host_id, pool):
     Networks block
     """
     if not request.user.is_authenticated():
-        return HttpResponseRedirect('/login')
+        return HttpResponseRedirect(reverse('login'))
 
     errors = []
     compute = Compute.objects.get(id=host_id)
@@ -76,7 +77,8 @@ def network(request, host_id, pool):
         device = conn.get_bridge_device()
         autostart = conn.get_autostart()
         ipv4_forward = conn.get_ipv4_forward()
-        ipv4_dhcp_range = conn.get_ipv4_dhcp_range()
+        ipv4_dhcp_range_start = conn.get_ipv4_dhcp_range_start()
+        ipv4_dhcp_range_end = conn.get_ipv4_dhcp_range_end()
         ipv4_network = conn.get_ipv4_network()
         fixed_address = conn.get_mac_ipaddr()
     except libvirtError as err:
@@ -98,7 +100,7 @@ def network(request, host_id, pool):
         if 'delete' in request.POST:
             try:
                 conn.delete()
-                return HttpResponseRedirect('/networks/%s/' % host_id)
+                return HttpResponseRedirect(reverse('networks', args=[host_id]))
             except libvirtError as error_msg:
                 errors.append(error_msg.message)
         if 'set_autostart' in request.POST:

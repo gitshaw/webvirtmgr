@@ -12,12 +12,8 @@ def network_size(net, dhcp=None):
     """
     mask = IP(net).strNetmask()
     addr = IP(net)
-    if addr[0].strNormal()[-1] == '0':
-        gateway = addr[1].strNormal()
-        dhcp_pool = [addr[2].strNormal(), addr[addr.len() - 2].strNormal()]
-    else:
-        gateway = addr[0].strNormal()
-        dhcp_pool = [addr[1].strNormal(), addr[addr.len() - 2].strNormal()]
+    gateway = addr[1].strNormal()
+    dhcp_pool = [addr[2].strNormal(), addr[addr.len() - 2].strNormal()]
     if dhcp:
         return gateway, mask, dhcp_pool
     else:
@@ -151,6 +147,20 @@ class wvmNetwork(wvmConnect):
 
         return [IP(dhcpstart), IP(dhcpend)]
 
+    def get_ipv4_dhcp_range_start(self):
+        dhcp = self.get_ipv4_dhcp_range()
+        if not dhcp:
+            return None
+
+        return dhcp[0]
+
+    def get_ipv4_dhcp_range_end(self):
+        dhcp = self.get_ipv4_dhcp_range()
+        if not dhcp:
+            return None
+
+        return dhcp[1]
+
     def can_pxe(self):
         xml = self.get_xml()
         forward = self.get_ipv4_forward()[0]
@@ -166,4 +176,5 @@ class wvmNetwork(wvmConnect):
                 mac = net.xpathEval('@mac')[0].content
                 result.append({'host': host, 'mac': mac})
             return result
+
         return util.get_xml_path(self._XMLDesc(0), func=network)

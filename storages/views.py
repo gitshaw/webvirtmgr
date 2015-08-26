@@ -2,6 +2,7 @@ from django.shortcuts import render_to_response
 from django.http import HttpResponseRedirect
 from django.template import RequestContext
 from django.utils.translation import ugettext_lazy as _
+from django.core.urlresolvers import reverse
 
 from servers.models import Compute
 from storages.forms import AddStgPool, AddImage, CloneImage
@@ -16,7 +17,7 @@ def storages(request, host_id):
     Storage pool block
     """
     if not request.user.is_authenticated():
-        return HttpResponseRedirect('/login')
+        return HttpResponseRedirect(reverse('login'))
 
     errors = []
     compute = Compute.objects.get(id=host_id)
@@ -49,9 +50,13 @@ def storages(request, host_id):
                             conn.create_storage_ceph(data['stg_type'], data['name'],
                                                      data['ceph_pool'], data['ceph_host'],
                                                      data['ceph_user'], data['secret'])
+                        elif data['stg_type'] == 'netfs':
+                            conn.create_storage_netfs(data['stg_type'], data['name'],
+                                                      data['netfs_host'], data['source'],
+                                                      data['source_format'], data['target'])
                         else:
                             conn.create_storage(data['stg_type'], data['name'], data['source'], data['target'])
-                        return HttpResponseRedirect('/storage/%s/%s/' % (host_id, data['name']))
+                        return HttpResponseRedirect(reverse('storage', args=[host_id, data['name']]))
         conn.close()
     except libvirtError as err:
         errors.append(err)
@@ -64,7 +69,7 @@ def storage(request, host_id, pool):
     Storage pool block
     """
     if not request.user.is_authenticated():
-        return HttpResponseRedirect('/login')
+        return HttpResponseRedirect(reverse('login'))
 
     def handle_uploaded_file(path, f_name):
         target = path + '/' + str(f_name)
@@ -75,6 +80,7 @@ def storage(request, host_id, pool):
 
     errors = []
     compute = Compute.objects.get(id=host_id)
+    meta_prealloc = False
 
     try:
         conn = wvmStorage(compute.hostname,
@@ -120,7 +126,7 @@ def storage(request, host_id, pool):
         if 'delete' in request.POST:
             try:
                 conn.delete()
-                return HttpResponseRedirect('/storages/%s/' % host_id)
+                return HttpResponseRedirect(reverse('storages', args=[host_id]))
             except libvirtError as error_msg:
                 errors.append(error_msg.message)
         if 'set_autostart' in request.POST:
@@ -139,13 +145,13 @@ def storage(request, host_id, pool):
             form = AddImage(request.POST)
             if form.is_valid():
                 data = form.cleaned_data
-                img_name = data['name'] + '.img'
-                if img_name in conn.update_volumes():
-                    msg = _("Volume name already use")
-                    errors.append(msg)
-                if not errors:
-                    conn.create_volume(data['name'], data['size'], data['format'])
+                if data['meta_prealloc'] and data['format'] == 'qcow2':
+                    meta_prealloc = True
+                try:
+                    conn.create_volume(data['name'], data['size'], data['format'], meta_prealloc)
                     return HttpResponseRedirect(request.get_full_path())
+                except libvirtError as err:
+                    errors.append(err)
         if 'del_volume' in request.POST:
             volname = request.POST.get('volname', '')
             try:
@@ -166,16 +172,19 @@ def storage(request, host_id, pool):
             if form.is_valid():
                 data = form.cleaned_data
                 img_name = data['name'] + '.img'
+                meta_prealloc = 0
                 if img_name in conn.update_volumes():
                     msg = _("Name of volume name already use")
                     errors.append(msg)
                 if not errors:
                     if data['convert']:
                         format = data['format']
+                        if data['meta_prealloc'] and data['format'] == 'qcow2':
+                            meta_prealloc = True
                     else:
                         format = None
                     try:
-                        conn.clone_volume(data['image'], data['name'], format)
+                        conn.clone_volume(data['image'], data['name'], format, meta_prealloc)
                         return HttpResponseRedirect(request.get_full_path())
                     except libvirtError as err:
                         errors.append(err)

@@ -11,16 +11,16 @@ class FlavorAddForm(forms.Form):
                             error_messages={'required': _('No flavor name has been entered')},
                             max_length=20)
     vcpu = forms.IntegerField(label="VCPU",
-                              error_messages={'required': _('No VCPU has been entered')},)
+                              error_messages={'required': _('No VCPU has been entered')}, )
     disk = forms.IntegerField(label="HDD",
-                              error_messages={'required': _('No HDD image has been entered')},)
+                              error_messages={'required': _('No HDD image has been entered')}, )
     memory = forms.IntegerField(label="RAM",
-                                error_messages={'required': _('No RAM size has been entered')},)
+                                error_messages={'required': _('No RAM size has been entered')}, )
 
     def clean_name(self):
         label = self.cleaned_data['label']
-        have_symbol = re.match('[^a-zA-Z0-9._-]+', label)
-        if have_symbol:
+        have_symbol = re.match('^[a-zA-Z0-9._-]+$', label)
+        if not have_symbol:
             raise forms.ValidationError(_('The flavor name must not contain any special characters'))
         elif len(label) > 20:
             raise forms.ValidationError(_('The flavor name must not exceed 20 characters'))
@@ -43,13 +43,14 @@ class NewVMForm(forms.Form):
     template = forms.CharField(required=False)
     images = forms.CharField(required=False)
     hdd_size = forms.IntegerField(required=False)
+    meta_prealloc = forms.BooleanField(required=False)
     virtio = forms.BooleanField(required=False)
     mac = forms.CharField(required=False)
 
     def clean_name(self):
         name = self.cleaned_data['name']
-        have_symbol = re.match('[^a-zA-Z0-9._-]+', name)
-        if have_symbol:
+        have_symbol = re.match('^[a-zA-Z0-9._-]+$', name)
+        if not have_symbol:
             raise forms.ValidationError(_('The name of the virtual machine must not contain any special characters'))
         elif len(name) > 20:
             raise forms.ValidationError(_('The name of the virtual machine must not exceed 20 characters'))

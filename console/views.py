@@ -3,20 +3,21 @@ import re
 from django.shortcuts import render_to_response
 from django.template import RequestContext
 from django.http import HttpResponseRedirect
+from django.core.urlresolvers import reverse
 
 from instance.models import Instance
 from vrtManager.instance import wvmInstance
 
-
-WS_PORT = 6080
+from webvirtmgr.settings import WS_PORT
+from webvirtmgr.settings import WS_PUBLIC_HOST
 
 
 def console(request):
     """
-    VNC instance block
+    Console instance block
     """
     if not request.user.is_authenticated():
-        return HttpResponseRedirect('/login')
+        return HttpResponseRedirect(reverse('login'))
 
     if request.method == 'GET':
         token = request.GET.get('token', '')
@@ -31,15 +32,28 @@ def console(request):
                            instance.compute.password,
                            instance.compute.type,
                            instance.name)
-        vnc_passwd = conn.get_vnc_passwd()
+        console_type = conn.get_console_type()
+        console_websocket_port = conn.get_console_websocket_port()
+        console_passwd = conn.get_console_passwd()
     except:
-        vnc_passwd = None
+        console_type = None
+        console_websocket_port = None
+        console_passwd = None
 
-    wsproxy_port = WS_PORT
-    wsproxy_host = request.get_host()
-    if ':' in wsproxy_host:
-        wsproxy_host = re.sub(':[0-9]+', '', wsproxy_host)
+    ws_port = console_websocket_port if console_websocket_port else WS_PORT
+    ws_host = WS_PUBLIC_HOST if WS_PUBLIC_HOST else request.get_host()
 
-    response = render_to_response('console.html', locals(), context_instance=RequestContext(request))
+    if ':' in ws_host:
+        ws_host = re.sub(':[0-9]+', '', ws_host)
+
+    if console_type == 'vnc':
+        response = render_to_response('console-vnc.html', locals(),
+                                      context_instance=RequestContext(request))
+    elif console_type == 'spice':
+        response = render_to_response('console-spice.html', locals(),
+                                      context_instance=RequestContext(request))
+    else:
+        response = "Console type %s no support" % console_type
+
     response.set_cookie('token', token)
     return response

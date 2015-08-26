@@ -3,11 +3,17 @@
 #
 import time
 import os.path
-from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE, VIR_MIGRATE_LIVE
+try:
+    from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE, VIR_MIGRATE_LIVE, \
+        VIR_MIGRATE_UNSAFE, VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA
+except:
+    from libvirt import libvirtError, VIR_DOMAIN_XML_SECURE, VIR_MIGRATE_LIVE
 from vrtManager import util
 from xml.etree import ElementTree
 from datetime import datetime
 from vrtManager.connection import wvmConnect
+
+from webvirtmgr.settings import QEMU_CONSOLE_TYPES
 
 
 class wvmInstances(wvmConnect):
@@ -65,10 +71,12 @@ class wvmInstances(wvmConnect):
         dom = self.get_instance(name)
         dom.resume()
 
-    def moveto(self, conn, name, live, undefine):
+    def moveto(self, conn, name, live, unsafe, undefine):
         flags = 0
         if live and conn.get_status() == 1:
             flags |= VIR_MIGRATE_LIVE
+        if unsafe and conn.get_status() == 1:
+            flags |= VIR_MIGRATE_UNSAFE
         dom = conn.get_instance(name)
         dom.migrate(self.wvm, flags, name, None, 0)
         if undefine:
@@ -107,13 +115,16 @@ class wvmInstance(wvmConnect):
         self.instance.resume()
 
     def delete(self):
-        self.instance.undefine()
+        try:
+            self.instance.undefineFlags(VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA)
+        except:
+            self.instance.undefine()
 
     def _XMLDesc(self, flag):
         return self.instance.XMLDesc(flag)
 
     def _defineXML(self, xml):
-        self.wvm.defineXML(xml)
+        return self.wvm.defineXML(xml)
 
     def get_status(self):
         return self.instance.info()[0]
@@ -166,6 +177,7 @@ class wvmInstance(wvmConnect):
                     if mac == mac_host:
                         return host
                 return None
+
             return util.get_xml_path(net.XMLDesc(0), func=fixed)
 
         def networks(ctx):
@@ -180,6 +192,7 @@ class wvmInstance(wvmConnect):
                     ip = None
                 result.append({'mac': mac_host, 'nic': nic_host, 'ip': ip})
             return result
+
         return util.get_xml_path(self._XMLDesc(0), func=networks)
 
     def get_disk_device(self):
@@ -189,12 +202,14 @@ class wvmInstance(wvmConnect):
             volume = None
             storage = None
             src_fl = None
+            disk_format = None
             for disk in ctx.xpathEval('/domain/devices/disk'):
                 device = disk.xpathEval('@device')[0].content
                 if device == 'disk':
                     try:
                         dev = disk.xpathEval('target/@dev')[0].content
-                        src_fl = disk.xpathEval('source/@file|source/@dev|source/@name')[0].content
+                        src_fl = disk.xpathEval('source/@file|source/@dev|source/@name|source/@volume')[0].content
+                        disk_format = disk.xpathEval('driver/@type')[0].content
                         try:
                             vol = self.get_volume_by_path(src_fl)
                             volume = vol.name()
@@ -205,8 +220,10 @@ class wvmInstance(wvmConnect):
                     except:
                         pass
                     finally:
-                        result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': src_fl})
+                        result.append(
+                            {'dev': dev, 'image': volume, 'storage': storage, 'path': src_fl, 'format': disk_format})
             return result
+
         return util.get_xml_path(self._XMLDesc(0), func=disks)
 
     def get_media_device(self):
@@ -235,9 +252,20 @@ class wvmInstance(wvmConnect):
                     finally:
                         result.append({'dev': dev, 'image': volume, 'storage': storage, 'path': src_fl})
             return result
+
         return util.get_xml_path(self._XMLDesc(0), func=disks)
 
     def mount_iso(self, dev, image):
+        def attach_iso(dev, disk, vol):
+            if disk.get('device') == 'cdrom':
+                for elm in disk:
+                    if elm.tag == 'target':
+                        if elm.get('dev') == dev:
+                            src_media = ElementTree.Element('source')
+                            src_media.set('file', vol.path())
+                            disk.insert(2, src_media)
+                            return True
+
         storages = self.get_storages()
         for storage in storages:
             stg = self.get_storage(storage)
@@ -247,13 +275,8 @@ class wvmInstance(wvmConnect):
                         vol = stg.storageVolLookupByName(image)
         tree = ElementTree.fromstring(self._XMLDesc(0))
         for disk in tree.findall('devices/disk'):
-            if disk.get('device') == 'cdrom':
-                for elm in disk:
-                    if elm.tag == 'target':
-                        if elm.get('dev') == dev:
-                            src_media = ElementTree.Element('source')
-                            src_media.set('file', vol.path())
-                            disk.insert(2, src_media)
+            if attach_iso(dev, disk, vol):
+                break
         if self.get_status() == 1:
             xml = ElementTree.tostring(disk)
             self.instance.attachDevice(xml)
@@ -313,19 +336,23 @@ class wvmInstance(wvmConnect):
                         if elm.get('dev'):
                             dev_file = elm.get('dev')
                     if elm.tag == 'target':
-                            dev_bus = elm.get('dev')
+                        dev_bus = elm.get('dev')
                 if (dev_file and dev_bus) is not None:
                     if network_disk:
                         dev_file = dev_bus
                     devices.append([dev_file, dev_bus])
         for dev in devices:
-            rd_use_ago = self.instance.blockStats(dev[0])[1]
-            wr_use_ago = self.instance.blockStats(dev[0])[3]
-            time.sleep(1)
-            rd_use_now = self.instance.blockStats(dev[0])[1]
-            wr_use_now = self.instance.blockStats(dev[0])[3]
-            rd_diff_usage = rd_use_now - rd_use_ago
-            wr_diff_usage = wr_use_now - wr_use_ago
+            if self.get_status() == 1:
+                rd_use_ago = self.instance.blockStats(dev[0])[1]
+                wr_use_ago = self.instance.blockStats(dev[0])[3]
+                time.sleep(1)
+                rd_use_now = self.instance.blockStats(dev[0])[1]
+                wr_use_now = self.instance.blockStats(dev[0])[3]
+                rd_diff_usage = rd_use_now - rd_use_ago
+                wr_diff_usage = wr_use_now - wr_use_ago
+            else:
+                rd_diff_usage = 0
+                wr_diff_usage = 0
             dev_usage.append({'dev': dev[1], 'rd': rd_diff_usage, 'wr': wr_diff_usage})
         return dev_usage
 
@@ -333,17 +360,22 @@ class wvmInstance(wvmConnect):
         devices = []
         dev_usage = []
         tree = ElementTree.fromstring(self._XMLDesc(0))
-        for target in tree.findall("devices/interface/target"):
-            devices.append(target.get("dev"))
-        for i, dev in enumerate(devices):
-            rx_use_ago = self.instance.interfaceStats(dev)[0]
-            tx_use_ago = self.instance.interfaceStats(dev)[4]
-            time.sleep(1)
-            rx_use_now = self.instance.interfaceStats(dev)[0]
-            tx_use_now = self.instance.interfaceStats(dev)[4]
-            rx_diff_usage = (rx_use_now - rx_use_ago) * 8
-            tx_diff_usage = (tx_use_now - tx_use_ago) * 8
-            dev_usage.append({'dev': i, 'rx': rx_diff_usage, 'tx': tx_diff_usage})
+        if self.get_status() == 1:
+            tree = ElementTree.fromstring(self._XMLDesc(0))
+            for target in tree.findall("devices/interface/target"):
+                devices.append(target.get("dev"))
+            for i, dev in enumerate(devices):
+                rx_use_ago = self.instance.interfaceStats(dev)[0]
+                tx_use_ago = self.instance.interfaceStats(dev)[4]
+                time.sleep(1)
+                rx_use_now = self.instance.interfaceStats(dev)[0]
+                tx_use_now = self.instance.interfaceStats(dev)[4]
+                rx_diff_usage = (rx_use_now - rx_use_ago) * 8
+                tx_diff_usage = (tx_use_now - tx_use_ago) * 8
+                dev_usage.append({'dev': i, 'rx': rx_diff_usage, 'tx': tx_diff_usage})
+        else:
+            for i, dev in enumerate(self.get_net_device()):
+                dev_usage.append({'dev': i, 'rx': 0, 'tx': 0})
         return dev_usage
 
     def get_telnet_port(self):
@@ -362,44 +394,101 @@ class wvmInstance(wvmConnect):
                                 telnet_port = service_port
         return telnet_port
 
-    def get_vnc(self):
-        vnc = util.get_xml_path(self._XMLDesc(0),
-                                "/domain/devices/graphics[@type='vnc']/@port")
-        return vnc
+    def get_console_listen_addr(self):
+        listen_addr = util.get_xml_path(self._XMLDesc(0),
+                                        "/domain/devices/graphics/@listen")
+        if listen_addr is None:
+            listen_addr = util.get_xml_path(self._XMLDesc(0),
+                                            "/domain/devices/graphics/listen/@address")
+            if listen_addr is None:
+                return "127.0.0.1"
+        return listen_addr
 
-    def get_vnc_passwd(self):
+    def get_console_socket(self):
+        socket = util.get_xml_path(self._XMLDesc(0),
+                                   "/domain/devices/graphics/@socket")
+        return socket
+
+    def get_console_type(self):
+        console_type = util.get_xml_path(self._XMLDesc(0),
+                                         "/domain/devices/graphics/@type")
+        return console_type
+
+    def set_console_type(self, console_type):
+        current_type = self.get_console_type()
+        if current_type == console_type:
+            return True
+        if console_type == '' or console_type not in QEMU_CONSOLE_TYPES:
+            return False
+        xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
+        root = ElementTree.fromstring(xml)
+        try:
+            graphic = root.find("devices/graphics[@type='%s']" % current_type)
+        except SyntaxError:
+            # Little fix for old version ElementTree
+            graphic = root.find("devices/graphics")
+        graphic.set('type', console_type)
+        newxml = ElementTree.tostring(root)
+        self._defineXML(newxml)
+
+    def get_console_port(self, console_type=None):
+        if console_type is None:
+            console_type = self.get_console_type()
+        port = util.get_xml_path(self._XMLDesc(0),
+                                 "/domain/devices/graphics[@type='%s']/@port" % console_type)
+        return port
+
+    def get_console_websocket_port(self):
+        console_type = self.get_console_type()
+        websocket_port = util.get_xml_path(self._XMLDesc(0),
+                                           "/domain/devices/graphics[@type='%s']/@websocket" % console_type)
+        return websocket_port
+
+    def get_console_passwd(self):
         return util.get_xml_path(self._XMLDesc(VIR_DOMAIN_XML_SECURE),
                                  "/domain/devices/graphics/@passwd")
 
-    def set_vnc_passwd(self, passwd):
+    def set_console_passwd(self, passwd):
         xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
         root = ElementTree.fromstring(xml)
-        graphics_vnc = root.find("devices/graphics[@type='vnc']")
+        console_type = self.get_console_type()
+        try:
+            graphic = root.find("devices/graphics[@type='%s']" % console_type)
+        except SyntaxError:
+            # Little fix for old version ElementTree
+            graphic = root.find("devices/graphics")
+        if graphic is None:
+            return False
         if passwd:
-            graphics_vnc.set('passwd', passwd)
+            graphic.set('passwd', passwd)
         else:
             try:
-                graphics_vnc.attrib.pop('passwd')
+                graphic.attrib.pop('passwd')
             except:
                 pass
-        newxml = ElementTree.tostring(root, encoding='utf-8', method='xml')
-        self._defineXML(newxml)
+        newxml = ElementTree.tostring(root)
+        return self._defineXML(newxml)
 
-    def set_vnc_keymap(self, keymap):
+    def set_console_keymap(self, keymap):
         xml = self._XMLDesc(VIR_DOMAIN_XML_SECURE)
         root = ElementTree.fromstring(xml)
-        graphics_vnc = root.find("devices/graphics[@type='vnc']")
+        console_type = self.get_console_type()
+        try:
+            graphic = root.find("devices/graphics[@type='%s']" % console_type)
+        except SyntaxError:
+            # Little fix for old version ElementTree
+            graphic = root.find("devices/graphics")
         if keymap:
-            graphics_vnc.set('keymap', keymap)
+            graphic.set('keymap', keymap)
         else:
             try:
-                graphics_vnc.attrib.pop('keymap')
+                graphic.attrib.pop('keymap')
             except:
                 pass
-        newxml = ElementTree.tostring(root, encoding='utf-8', method='xml')
+        newxml = ElementTree.tostring(root)
         self._defineXML(newxml)
 
-    def get_vnc_keymap(self):
+    def get_console_keymap(self):
         return util.get_xml_path(self._XMLDesc(VIR_DOMAIN_XML_SECURE),
                                  "/domain/devices/graphics/@keymap") or ''
 
@@ -496,12 +585,20 @@ class wvmInstance(wvmConnect):
         uuid = tree.find('uuid')
         tree.remove(uuid)
 
+        for num, net in enumerate(tree.findall('devices/interface')):
+            elm = net.find('mac')
+            elm.set('address', clone_data['net-' + str(num)])
+
         for disk in tree.findall('devices/disk'):
             if disk.get('device') == 'disk':
                 elm = disk.find('target')
                 device_name = elm.get('dev')
                 if device_name:
                     target_file = clone_data['disk-' + device_name]
+                    try:
+                        meta_prealloc = clone_data['meta-' + device_name]
+                    except:
+                        meta_prealloc = False
                     elm.set('dev', device_name)
 
                 elm = disk.find('source')
@@ -516,6 +613,8 @@ class wvmInstance(wvmConnect):
                     vol_format = util.get_xml_path(vol.XMLDesc(0),
                                                    "/volume/target/format/@type")
 
+                    if vol_format == 'qcow2' and meta_prealloc:
+                        meta_prealloc = True
                     vol_clone_xml = """
                                     <volume>
                                         <name>%s</name>
@@ -526,6 +625,6 @@ class wvmInstance(wvmConnect):
                                         </target>
                                     </volume>""" % (target_file, vol_format)
                     stg = vol.storagePoolLookupByVolume()
-                    stg.createXMLFrom(vol_clone_xml, vol, 0)
+                    stg.createXMLFrom(vol_clone_xml, vol, meta_prealloc)
 
         self._defineXML(ElementTree.tostring(tree))

@@ -68,6 +68,24 @@ class wvmStorages(wvmConnect):
         stg.create(0)
         stg.setAutostart(1)
 
+    def create_storage_netfs(self, stg_type, name, netfs_host, source, source_format, target):
+        xml = """
+                <pool type='%s'>
+                <name>%s</name>
+                <source>
+                    <host name='%s'/>
+                    <dir path='%s'/>
+                    <format type='%s'/>
+                </source>
+                <target>
+                    <path>%s</path>
+                </target>
+                </pool>""" % (stg_type, name, netfs_host, source, source_format, target)
+        self.define_storage(xml, 0)
+        stg = self.get_storage(name)
+        stg.create(0)
+        stg.setAutostart(1)
+
 
 class wvmStorage(wvmConnect):
     def __init__(self, host, login, passwd, conn, pool):
@@ -185,7 +203,7 @@ class wvmStorage(wvmConnect):
             )
         return vol_list
 
-    def create_volume(self, name, size, vol_fmt='qcow2'):
+    def create_volume(self, name, size, vol_fmt='qcow2', metadata=False):
         size = int(size) * 1073741824
         storage_type = self.get_type()
         alloc = size
@@ -203,9 +221,9 @@ class wvmStorage(wvmConnect):
                     <format type='%s'/>
                 </target>
             </volume>""" % (name, size, alloc, vol_fmt)
-        self._createXML(xml, 0)
+        self._createXML(xml, metadata)
 
-    def clone_volume(self, name, clone, vol_fmt=None):
+    def clone_volume(self, name, clone, vol_fmt=None, metadata=False):
         storage_type = self.get_type()
         if storage_type == 'dir':
             clone += '.img'
@@ -221,4 +239,4 @@ class wvmStorage(wvmConnect):
                     <format type='%s'/>
                 </target>
             </volume>""" % (clone, vol_fmt)
-        self._createXMLFrom(xml, vol, 0)
+        self._createXMLFrom(xml, vol, metadata)

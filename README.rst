@@ -1,21 +1,28 @@
 =========================
-WebVirtMgr panel - v4.8.5
+WebVirtMgr panel - v4.8.9
 =========================
+-------
+New project like WebVirtMgr with User Management and Filesystem management - `WebVirtCloud <https://github.com/retspen/webvirtcloud>`_
+-------
+
+-------
+Warning
+-------
+
+In latest version app `console/webvirtmgr-novnc` move to `console/webvirtmgr-console` you need check your supervisor settings.
 
 ----------
 Whats new?
 ----------
 
-- Added webvirtmgr to pypi
-- Update Chart.js
-- Added page interfaces
+- Added RPM specs (Thanks: `Edoardo Spadoni <https://github.com/edospadoni>`_)
+- Added support SPICE, SSH Tunnel, fixed some bugs (Thanks: `brenard <https://github.com/brenard>`_)
+- Responsive design (Thanks: `Michel Käser <https://github.com/MaddinXx>`_)
+- Added VNC WebSocket support (Thanks: `Tolbkni Kao <https://github.com/tolbkni>`_)
 - Added novnc proxy supporting new websockify versions (Thanks: `casell <https://github.com/casell>`_)
-- Added support CEPH
-- Added instance creating from XML
 - Added support `TLS <http://libvirt.org/remote.html#Remote_certificates>`_ connection (Thanks: `junkb <https://github.com/junkb>`_)
 - `Puppet module to control libvirt/kvm <https://github.com/ITBlogger/puppet-kvm>`_ (Thanks: `Alex Scoble <https://github.com/ITBlogger>`_)
 - `Deployment via Fabric/Fabtools <https://github.com/retspen/webvirtmgr/tree/master/deploy/fabric>`_ (Thanks: `Mohab Usama <https://github.com/mohabusama>`_)
-- Added instance cloning (Settings -> Clone)
 
 Screenshots
 -----------
